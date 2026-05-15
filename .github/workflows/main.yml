@@ -36,7 +36,6 @@ jobs:
       run: |
         cd $HOME
         echo "===== 正在深度克隆 crDroid camellia 14.0 分支 ====="
-        # 修正了远程仓库的 URL 错误，并指定克隆 14.0 分支
         git clone --depth=1 -b 14.0 https://github.com/crdroidandroid/android_kernel_xiaomi_camellia kernel
         echo "源码克隆完成，大小："
         du -sh $HOME/kernel
@@ -47,8 +46,8 @@ jobs:
         export ARCH=arm64
         export CROSS_COMPILE=aarch64-linux-gnu-
         
-        # 1. 生成基础配置
-        make camellia_defconfig
+        # 1. 生成基础配置（【已修正】：使用 A14 分支标准的 vendor/camellia_defconfig）
+        make vendor/camellia_defconfig
         make olddefconfig
 
         # 2. 修复通用内联错误 (作为防范性补丁保留)
