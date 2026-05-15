@@ -35,8 +35,9 @@ jobs:
     - name: 克隆 crDroid 内核源码
       run: |
         cd $HOME
-        echo "===== 正在深度克隆 crDroid camellia 13.0 分支 ====="
-        git clone --depth=1 -b 13.0 https://github.com/crdroidandroid/android_kernel_xiaomi_camellia.github kernel
+        echo "===== 正在深度克隆 crDroid camellia 14.0 分支 ====="
+        # 修正了远程仓库的 URL 错误，并指定克隆 14.0 分支
+        git clone --depth=1 -b 14.0 https://github.com/crdroidandroid/android_kernel_xiaomi_camellia kernel
         echo "源码克隆完成，大小："
         du -sh $HOME/kernel
 
@@ -119,5 +120,5 @@ jobs:
       if: success()
       uses: actions/upload-artifact@v4
       with:
-        name: Kernel-crDroid-Camellia
+        name: Kernel-crDroid14-Camellia
         path: ~/output/*
