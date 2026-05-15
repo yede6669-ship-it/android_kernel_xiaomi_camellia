@@ -46,9 +46,31 @@ jobs:
         export ARCH=arm64
         export CROSS_COMPILE=aarch64-linux-gnu-
         
-        # 1. 生成基础配置（【已修正】：使用 A14 分支标准的 vendor/camellia_defconfig）
-        make vendor/camellia_defconfig
-        make olddefconfig
+        echo "===== 正在自动探测有效的 defconfig ====="
+        cd arch/arm64/configs/
+        
+        # 自动寻找名字里带有 camellia 的配置文件
+        DETECTED_CONFIG=$(find . -maxdepth 2 -name "*camellia*" | sed 's|^\./||' | head -n 1)
+        
+        # 如果找不到带 camellia 的，就找带 gki 的或者排在前面的 defconfig
+        if [ -z "$DETECTED_CONFIG" ]; then
+          DETECTED_CONFIG=$(find . -maxdepth 2 -name "*defconfig*" | sed 's|^\./||' | head -n 1)
+        fi
+        
+        echo "----------------------------------------"
+        echo "当前 configs 目录下的所有文件列表如下（供排查）："
+        ls -R
+        echo "----------------------------------------"
+        
+        cd $HOME/kernel
+        if [ -n "$DETECTED_CONFIG" ]; then
+          echo "🎯 自动化探测成功！选用的配置文件为: $DETECTED_CONFIG"
+          make "$DETECTED_CONFIG"
+          make olddefconfig
+        else
+          echo "❌ 无法自动找到任何 defconfig 配置文件，强制停止。"
+          exit 1
+        fi
 
         # 2. 修复通用内联错误 (作为防范性补丁保留)
         sed -i 's/inline void ksm_flock/void ksm_flock/g' include/linux/keyslot-manager.h 2>/dev/null || true
@@ -96,8 +118,8 @@ jobs:
           exit 1
         fi
 
-    - name: 上传错误日志 (仅在失败时)
-      if: failure()
+    - name: 上传错误日志 (无论成功失败都上传)
+      if: always()
       uses: actions/upload-artifact@v4
       with:
         name: crdroid-build-log
