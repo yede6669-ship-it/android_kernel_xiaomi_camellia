@@ -1,0 +1,123 @@
+name: Build crDroid Kernel
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+
+    steps:
+    - name: 检出仓库
+      uses: actions/checkout@v4
+
+    - name: 清理磁盘空间
+      run: |
+        sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY"
+        sudo apt-get clean && sudo apt-get autoremove -y
+        df -h
+
+    - name: 安装GCC-9和依赖
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          gcc-9 g++-9 \
+          gcc-9-aarch64-linux-gnu \
+          binutils-aarch64-linux-gnu \
+          bc bison build-essential curl flex git libssl-dev \
+          wget python3 device-tree-compiler libncurses5-dev make
+
+        sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 90
+        sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-9 90
+        sudo ln -sf /usr/bin/aarch64-linux-gnu-gcc-9 /usr/local/bin/aarch64-linux-gnu-gcc
+
+    - name: 克隆 crDroid 内核源码
+      run: |
+        cd $HOME
+        echo "===== 正在深度克隆 crDroid camellia 13.0 分支 ====="
+        git clone --depth=1 -b 13.0 https://github.com/crdroidandroid/android_kernel_xiaomi_camellia.github kernel
+        echo "源码克隆完成，大小："
+        du -sh $HOME/kernel
+
+    - name: 配置内核并修复源码补丁
+      run: |
+        cd $HOME/kernel
+        export ARCH=arm64
+        export CROSS_COMPILE=aarch64-linux-gnu-
+        
+        # 1. 生成基础配置
+        make camellia_defconfig
+        make olddefconfig
+
+        # 2. 修复通用内联错误 (作为防范性补丁保留)
+        sed -i 's/inline void ksm_flock/void ksm_flock/g' include/linux/keyslot-manager.h 2>/dev/null || true
+        sed -i 's/inline void ksm_funlock/void ksm_funlock/g' include/linux/keyslot-manager.h 2>/dev/null || true
+        
+        echo "✅ 基础配置与补丁准备就绪"
+
+    - name: 编译内核
+      run: |
+        cd $HOME/kernel
+        export ARCH=arm64
+        export SUBARCH=arm64
+        export CROSS_COMPILE=aarch64-linux-gnu-
+        export CC=aarch64-linux-gnu-gcc
+        export HOSTCC=gcc-9
+        export HOSTCXX=g++-9
+        export KCFLAGS="-w"
+        export KAFLAGS="-w"
+
+        echo "===== 开始编译 ====="
+        make -j$(nproc) Image.gz-dtb 2>&1 | tee build.log || {
+          echo "===== Image.gz-dtb 失败，尝试备选编译方案 ====="
+          if [ ! -f "arch/arm64/boot/Image" ]; then
+             make -j$(nproc) Image 2>&1 | tee -a build.log || true
+          fi
+
+          if [ -f "arch/arm64/boot/Image" ]; then
+            gzip -c arch/arm64/boot/Image > arch/arm64/boot/Image.gz
+            make -j$(nproc) dtbs || true
+            DTB=$(find arch/arm64/boot/dts -name "*.dtb" 2>/dev/null | head -1)
+            [ -n "$DTB" ] && cat arch/arm64/boot/Image.gz "$DTB" > arch/arm64/boot/Image.gz-dtb
+          fi
+        }
+
+        echo "===== 检查编译结果 ====="
+        if [ -f "arch/arm64/boot/Image.gz-dtb" ]; then
+          echo "✅ 成功生成 Image.gz-dtb"
+        elif [ -f "arch/arm64/boot/Image" ]; then
+          echo "⚠️ 仅生成 Image (未合并 DTB)"
+        else
+          echo "❌ 编译失败！详细错误追踪如下："
+          echo "-------------------- ERROR LOG START --------------------"
+          grep -n -B 3 -A 3 -i -E "error:|fatal error:" build.log || tail -n 50 build.log
+          echo "-------------------- ERROR LOG END ----------------------"
+          exit 1
+        fi
+
+    - name: 上传错误日志 (仅在失败时)
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: crdroid-build-log
+        path: ~/kernel/build.log
+
+    - name: 打包产物
+      if: success()
+      run: |
+        mkdir -p $HOME/output
+        for f in Image.gz-dtb Image.gz Image; do
+          if [ -f "$HOME/kernel/arch/arm64/boot/$f" ]; then
+            cp "$HOME/kernel/arch/arm64/boot/$f" $HOME/output/
+            echo "已打包产物: $f"
+            break
+          fi
+        done
+
+    - name: 上传内核镜像
+      if: success()
+      uses: actions/upload-artifact@v4
+      with:
+        name: Kernel-crDroid-Camellia
+        path: ~/output/*
